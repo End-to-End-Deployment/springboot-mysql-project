@@ -1,0 +1,15 @@
+# Use the official MySQL image from the Docker Hub
+FROM mysql:8.0
+
+# Set the MySQL root password, database name, and user credentials
+ENV MYSQL_ROOT_PASSWORD=rootpassword
+ENV MYSQL_DATABASE=springbootdb
+ENV MYSQL_USER=opstree
+ENV MYSQL_PASSWORD=Opstree@123
+
+# Copy the initialization script to the container
+COPY ./init-db.sql /docker-entrypoint-initdb.d/
+
+# Expose the MySQL port
+EXPOSE 3306
+
