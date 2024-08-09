@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: springboot-deployment
+  namespace: default
+spec:
+  replicas: 3  # Increased replicas for higher availability
+  selector:
+    matchLabels:
+      app: springboot
+  template:
+    metadata:
+      labels:
+        app: springboot
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: topology.kubernetes.io/zone
+                    operator: In
+                    values:
+                      - us-east-1f
+                      - us-east-1a
+      containers:
+        - name: springboot
+          image: 7720001490/employee-custom:{{ .Values.image.tag }}  # Replace with your image name and tag
+          ports:
+            - containerPort: 8090
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:mysql://mysql-service:3306/springbootdb
+            - name: SPRING_DATASOURCE_USERNAME
+              value: opstree
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: Opstree@123
+          volumeMounts:
+            - name: config-volume
+              mountPath: /config
+              readOnly: true
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "1Gi"
+              cpu: "1"
+      volumes:
+        - name: config-volume
+          configMap:
+            name: springboot-configmap
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: springboot-service
+  namespace: default
+spec:
+  selector:
+    app: springboot
+  ports:
+    - protocol: TCP
+      port: 8090
+      targetPort: 8090
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: springboot-configmap
+  namespace: default
+data:
+  application.properties: |
+    server.port=8090
+    spring.datasource.url=jdbc:mysql://mysql-service:3306/springbootdb
+    spring.datasource.username=opstree
+    spring.datasource.password=Opstree@123
+    spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
+    spring.jpa.database-platform=org.hibernate.dialect.MySQL5InnoDBDialect
+    spring.jpa.show-sql=true
+    spring.jpa.properties.hibernate.format_sql=true
+    spring.h2.console.enabled=true
+    spring.h2.console.path=/h2
+    spring.jpa.hibernate.ddl-auto=update
