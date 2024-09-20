@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: springboot-deployment
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: springboot
+      version: green
+  template:
+    metadata:
+      labels:
+        app: springboot
+        version: green
+    spec:
+      containers:
+        - name: springboot
+          image: 7720001490/employee-custom:v1  # Replace with your image name and tag
+          ports:
+            - containerPort: 8090
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:mysql://mysql-service:3306/springbootdb
+            - name: SPRING_DATASOURCE_USERNAME
+              value: opstree
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: Opstree@123
+          volumeMounts:
+            - name: config-volume
+              mountPath: /config
+              readOnly: true
+      volumes:
+        - name: config-volume
+          configMap:
+            name: springboot-configmap
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: springboot-configmap
+  namespace: default
+data:
+  application.properties: |
+    server.port=8090
+    spring.datasource.url=jdbc:mysql://mysql-service:3306/springbootdb
+    spring.datasource.username=opstree
+    spring.datasource.password=Opstree@123
+    spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
+    spring.jpa.database-platform=org.hibernate.dialect.MySQL5InnoDBDialect
+    spring.jpa.show-sql=true
+    spring.jpa.properties.hibernate.format_sql=true
+    spring.h2.console.enabled=true
+    spring.h2.console.path=/h2
+    spring.jpa.hibernate.ddl-auto=update
