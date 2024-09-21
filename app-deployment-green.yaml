@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: springboot-deployment
+  name: springboot-deployment-green
   namespace: webapps
 spec:
   replicas: 1
@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: springboot
-          image: 7720001490/employee-custom:v1  # Replace with your image name and tag
+          image: 7720001490/employee-custom:V2  # Replace with your image name and tag
           ports:
             - containerPort: 8090
           env:
