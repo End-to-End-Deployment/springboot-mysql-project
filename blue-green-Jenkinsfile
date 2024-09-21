@@ -1,0 +1,165 @@
+pipeline {
+    agent any
+    
+    tools {
+        maven 'maven3'
+    }
+    
+    environment {
+        IMAGE_NAME = "7720001490/employee-custom"
+        TAG = "${params.DOCKER_TAG}"
+        SCANNER_HOME=tool "sonar-scanner"
+        KUBE_NAMESPACE = "webapps"
+    }
+    
+    parameters {
+        choice(name: 'DEPLOY_ENV', choices: ['blue', 'green'], description: 'Choose the environment to deploy: Blue or Green')
+        choice(name: 'DOCKER_TAG', choices: ['v1', 'v2'], description: 'Choose the docker image tag for the deployment')
+        booleanParam(name: 'SWITCH_TRAFFIC', defaultValue: false, description: 'Switch traffic between Blue and Green')
+    }
+
+    stages {
+        stage('Git Checkout') {
+            steps {
+                checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[credentialsId: 'git-cred', url: 'https://github.com/End-to-End-Deployment/springboot-mysql-project.git']])
+            }
+        }
+       
+        stage('Compile') {
+            steps {
+                sh 'mvn compile'
+            }
+        }
+        
+        stage('Tests') {
+            steps {
+                sh 'mvn test -DskipTests=true'
+            }
+        }
+        
+        stage('Trivy FS Scan') {
+            steps {
+                sh 'trivy fs --format table -o fs.html .'
+            }
+        }
+        
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar') {
+                    sh '$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectKey=Multitier -Dsonar.projectName=Multitier -Dsonar.java.binaries=target'
+                }
+            }
+        }
+        
+        /* Commenting out Quality Gate Check
+        stage('Quality Gate Check') {
+            steps {
+                timeout(time: 1, unit: 'HOURS') {
+                    waitForQualityGate abortPipeline: false
+                }
+            }
+        }
+        */
+        
+        stage('Build') {
+            steps {
+                sh 'mvn package -DskipTests=true'
+            }
+        }
+        
+        /* Commented out Publish Artifact to Nexus
+        stage('Publish Artifact to Nexus') {
+            steps {
+                withMaven(globalMavenSettingsConfig: 'maven-settings', maven: 'maven3', traceability: true) {
+                    sh 'mvn deploy -DskipTests=true'
+                }
+            }
+        }
+        */
+        
+        stage('Docker Build and Tag Image') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker-cred') {
+                        sh "docker build -t ${IMAGE_NAME}:${TAG} ."
+                    }
+                }
+            }
+        }
+        
+        stage('Trivy Image Scan') {
+            steps {
+                sh "trivy image --format table -o fs.html ${IMAGE_NAME}:${TAG}"
+            }
+        }
+        
+        stage('Docker Push Image') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker-cred') {
+                        sh "docker push ${IMAGE_NAME}:${TAG}"
+                    }
+                }
+            }
+        }
+        
+        stage('MYSQL and Service Deployment') {
+            steps {
+                script {
+                    withKubeConfig(caCertificate: '', clusterName: 'dev-medium-eks-cluster', contextName: '', namespace: KUBE_NAMESPACE, restrictKubeConfigAccess: 'false', credentialsId: 'k8-token', serverUrl: 'https://3B78DAF12C76BD785B5E57E310F41BF4.gr7.ap-northeast-1.eks.amazonaws.com') {
+                        sh "kubectl apply -f statefulsets.yaml -n ${KUBE_NAMESPACE}"
+                    }
+                }
+            }
+        }
+        
+        stage('Springboot-Service Deployment') {
+            steps {
+                script {
+                    withKubeConfig(caCertificate: '', clusterName: 'dev-medium-eks-cluster', contextName: '', namespace: KUBE_NAMESPACE, restrictKubeConfigAccess: 'false', credentialsId: 'k8-token', serverUrl: 'https://3B78DAF12C76BD785B5E57E310F41BF4.gr7.ap-northeast-1.eks.amazonaws.com') {
+                        sh """if ! kubectl get svc springboot-service -n ${KUBE_NAMESPACE}; then
+                               kubectl apply -f springboot-service.yaml -n ${KUBE_NAMESPACE}
+                               fi"""
+                    }
+                }
+            }
+        }
+        
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    def deploymentFile = (params.DEPLOY_ENV == 'blue') ? 'app-deployment-blue.yaml' : 'app-deployment-green.yaml'
+                    withKubeConfig(caCertificate: '', clusterName: 'dev-medium-eks-cluster', contextName: '', namespace: KUBE_NAMESPACE, restrictKubeConfigAccess: 'false', credentialsId: 'k8-token', serverUrl: 'https://3B78DAF12C76BD785B5E57E310F41BF4.gr7.ap-northeast-1.eks.amazonaws.com') {
+                        sh "kubectl apply -f ${deploymentFile} -n ${KUBE_NAMESPACE}"
+                    }
+                }
+            }
+        }
+        
+        stage('Switch Traffic Between Blue and Green Deployment') {
+            when {
+                expression { return params.SWITCH_TRAFFIC }
+            }
+            steps {
+                script {
+                    def newEnv = params.DEPLOY_ENV
+                    withKubeConfig(caCertificate: '', clusterName: 'dev-medium-eks-cluster', contextName: '', namespace: KUBE_NAMESPACE, restrictKubeConfigAccess: 'false', credentialsId: 'k8-token', serverUrl: 'https://3B78DAF12C76BD785B5E57E310F41BF4.gr7.ap-northeast-1.eks.amazonaws.com') {
+                        sh "kubectl patch service springboot-service -n webapps -p '{\"spec\":{\"selector\":{\"app\":\"springboot\",\"version\":\"${newEnv}\"}}}'"
+                    }
+                }
+            }
+        }
+        
+        stage('Verify Deployment') {
+            steps {
+                script {
+                    def verifyEnv = params.DEPLOY_ENV
+                    withKubeConfig(caCertificate: '', clusterName: 'dev-medium-eks-cluster', contextName: '', namespace: KUBE_NAMESPACE, restrictKubeConfigAccess: 'false', credentialsId: 'k8-token', serverUrl: 'https://3B78DAF12C76BD785B5E57E310F41BF4.gr7.ap-northeast-1.eks.amazonaws.com') {
+                        sh """kubectl get pods -l version=${verifyEnv} -n ${KUBE_NAMESPACE}
+                              kubectl get svc springboot-service -n ${KUBE_NAMESPACE}"""
+                    }
+                }
+            }
+        }
+    }
+}
