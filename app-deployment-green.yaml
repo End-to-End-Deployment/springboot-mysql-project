@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: springboot
-          image: 7720001490/employee-custom:V2  # Replace with your image name and tag
+          image: 7720001490/employee-custom:v2  # Replace with your image name and tag
           ports:
             - containerPort: 8090
           env:
