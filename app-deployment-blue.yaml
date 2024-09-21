@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: springboot-deployment
+  name: springboot-deployment-blue
   namespace: webapps
 spec:
   replicas: 1
